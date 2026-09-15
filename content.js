@@ -1,4 +1,4 @@
-/* Runs on https://*.qwen.ai/* — detects & fills the signup form */
+/* Runs on https://*.qwen.ai/* — detects & fills the signup form (Tor Browser compatible) */
 (() => {
   if (window.__qwenAutofillLoaded) return;
   window.__qwenAutofillLoaded = true;
@@ -103,7 +103,7 @@
   let sessionEmail = null;
 
   async function autoTick() {
-    const cfg = await chrome.storage.local.get(['autofill','autosubmit','password','namespace','tag']);
+    const cfg = await browser.storage.local.get(['autofill','autosubmit','password','namespace','tag']);
     if (!cfg.autofill) return;
     const el = classify().email[0];
     if (!el || el.value.trim()) return;                                   // already filled → don't clobber
@@ -111,7 +111,7 @@
     if (!sessionEmail) {
       const gen = makeEmail(cfg.namespace, cfg.tag);
       sessionEmail = gen.email;
-      chrome.storage.local.set({ lastEmail: gen.email, lastTag: gen.tag });
+      browser.storage.local.set({ lastEmail: gen.email, lastTag: gen.tag });
     }
     fillForm({ email: sessionEmail, password: cfg.password });
     if (cfg.autosubmit) setTimeout(clickSubmit, 400);
@@ -125,7 +125,7 @@
   autoTick();
 
   /* ---- commands from the popup ---- */
-  chrome.runtime.onMessage.addListener((msg, _s, sendResponse) => {
+  browser.runtime.onMessage.addListener((msg, _s, sendResponse) => {
     if (!msg?.type) return;
     if (msg.type === 'FILL') {
       const did = fillForm(msg);
