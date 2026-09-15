@@ -6,7 +6,7 @@ const DEFAULTS = { namespace: 'gti43', tag: 'qwen', password: '', apiKey: '',
 const API_URL = 'https://api.testmail.app/api/json';
 
 document.addEventListener('DOMContentLoaded', async () => {
-  const cfg = { ...DEFAULTS, ...(await chrome.storage.local.get(DEFAULTS)) };
+  const cfg = { ...DEFAULTS, ...(await browser.storage.local.get(DEFAULTS)) };
   $('namespace').value = cfg.namespace;
   $('tag').value       = cfg.tag;
   $('password').value  = cfg.password;
@@ -36,7 +36,7 @@ const readForm = () => ({
   autosubmit:$('autosubmit').checked,
 });
 
-async function save() { await chrome.storage.local.set(readForm()); flash('Settings saved ✔'); }
+async function save() { await browser.storage.local.set(readForm()); flash('Settings saved ✔'); }
 
 function makeEmail(cfg) {
   const chars = 'abcdefghjkmnpqrstuvwxyz23456789';
@@ -46,21 +46,21 @@ function makeEmail(cfg) {
 }
 
 async function sendToTab(msg) {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  const [tab] = await browser.tabs.query({ active: true, currentWindow: true });
   if (!tab?.id) throw new Error('no active tab');
-  try { return await chrome.tabs.sendMessage(tab.id, msg); }
+  try { return await browser.tabs.sendMessage(tab.id, msg); }
   catch {
-    await chrome.scripting.executeScript({ target: { tabId: tab.id }, files: ['content.js'] });
-    return await chrome.tabs.sendMessage(tab.id, msg);
+    await browser.tabs.executeScript(tab.id, { file: 'content.js' });
+    return await browser.tabs.sendMessage(tab.id, msg);
   }
 }
 
 async function fillNow(submit) {
   try {
     const cfg = readForm();
-    await chrome.storage.local.set(cfg);
+    await browser.storage.local.set(cfg);
     const { email, tag } = makeEmail(cfg);
-    await chrome.storage.local.set({ lastEmail: email, lastTag: tag });
+    await browser.storage.local.set({ lastEmail: email, lastTag: tag });
     $('lastemail').textContent = email;
     const res = await sendToTab({ type: 'FILL', email, password: cfg.password, autosubmit: submit });
     flash(res?.ok ? `Filled ${email}${submit ? ' → submitting' : ''}`
@@ -68,14 +68,23 @@ async function fillNow(submit) {
   } catch (e) { flash('Error: ' + e.message); }
 }
 
-/* NEW: safe fetch — surfaces the real server error instead of a JSON crash */
+/* Safe fetch for Tor Browser — surfaces real server errors */
 async function fetchJson(url) {
-  const r   = await fetch(url, { cache: 'no-store' });
-  const raw = await r.text();
-  let data = null;
-  try { data = JSON.parse(raw); } catch { /* not JSON */ }
-  if (!data) throw new Error(`TestMail replied HTTP ${r.status}: ${raw ? `"${raw.slice(0, 120)}"` : 'empty body'}`);
-  return data;
+  try {
+    const r   = await fetch(url, { 
+      cache: 'no-store',
+      headers: { 'Accept': 'application/json' }
+    });
+    if (!r.ok) {
+      const raw = await r.text();
+      throw new Error(`TestMail API HTTP ${r.status}: ${raw ? raw.slice(0, 150) : 'empty response'}`);
+    }
+    const data = await r.json();
+    return data || { emails: [] };
+  } catch (e) {
+    if (e.message.includes('HTTP')) throw e;
+    throw new Error(`Fetch failed: ${e.message}. Check API key & network.`);
+  }
 }
 
 /* NEW: manual fallback — paste the code from the TestMail dashboard */
@@ -92,48 +101,100 @@ async function fillManualCode() {
 async function getCode() {
   try {
     const cfg = readForm();
-    await chrome.storage.local.set(cfg);
-    if (!cfg.apiKey) return flash('Add your TestMail API key (testmail.app dashboard)');
-    const { lastEmail, lastTag } = await chrome.storage.local.get(['lastEmail', 'lastTag']);
-    if (!lastEmail) return flash('Fill the form first');
+    await browser.storage.local.set(cfg);
+    if (!cfg.apiKey) return flash('Add your TestMail API key from testmail.app dashboard');
+    const { lastEmail, lastTag } = await browser.storage.local.get(['lastEmail', 'lastTag']);
+    if (!lastEmail) return flash('Fill the form first to generate an email');
 
+    // Build API URL with proper encoding for Tor Browser compatibility
     const base = `${API_URL}?apikey=${encodeURIComponent(cfg.apiKey)}`
-               + `&namespace=${encodeURIComponent(cfg.namespace)}`;
+               + `&namespace=${encodeURIComponent(cfg.namespace)}`
+               + `&tag=${encodeURIComponent(lastTag || cfg.tag)}`;
 
-    const toStr = e => Array.isArray(e.to)
-      ? e.to.map(x => typeof x === 'string' ? x : (x?.address || '')).join(' ')
-      : (e.to?.address || e.to || '').toString();
+    // Helper to extract recipient addresses from email object
+    const toStr = e => {
+      if (Array.isArray(e.to)) {
+        return e.to.map(x => typeof x === 'string' ? x : (x?.address || '')).filter(Boolean).join(' ');
+      }
+      return (e.to?.address || e.to || '').toString();
+    };
 
     let target = null;
-    for (let i = 1; i <= 5 && !target; i++) {
-      flash(i === 1 ? 'Checking inbox…' : `Waiting for email… (try ${i}/5)`);
+    // Poll up to 5 times with 3-second intervals
+    for (let attempt = 1; attempt <= 5 && !target; attempt++) {
+      flash(attempt === 1 ? 'Fetching emails from TestMail…' : `Still waiting… (attempt ${attempt}/5)`);
+      
       let list = [];
       try {
-        list = (await fetchJson(`${base}&tag=${encodeURIComponent(lastTag || cfg.tag)}`)).emails || [];
-      } catch {
-        try {   // tag filter rejected? → query whole namespace, filter locally
-          list = (await fetchJson(base)).emails || [];
-        } catch (e2) { return flash(e2.message); }   // ← you'll now see the REAL error
+        // First try with tag filter
+        const response = await fetchJson(base);
+        list = response.emails || [];
+      } catch (tagErr) {
+        // If tag filter fails, try fetching all emails in namespace and filter locally
+        console.log('Tag filter failed, falling back to namespace-only query:', tagErr.message);
+        try {
+          const nsUrl = `${API_URL}?apikey=${encodeURIComponent(cfg.apiKey)}&namespace=${encodeURIComponent(cfg.namespace)}`;
+          const response = await fetchJson(nsUrl);
+          list = response.emails || [];
+        } catch (nsErr) {
+          return flash(`API Error: ${nsErr.message}`);
+        }
       }
+
+      // Sort by newest first
       list.sort((a, b) => (b.timestamp || 0) - (a.timestamp || 0));
-      target = list.find(e => toStr(e).toLowerCase().includes(lastEmail.toLowerCase()))
-            || list.find(e => /qwen/i.test(`${e.from || ''} ${e.subject || ''}`));
-      if (!target) await new Promise(r => setTimeout(r, 3000));
+      
+      // Find matching email: either sent to our generated address or related to qwen signup
+      target = list.find(e => {
+        const recipients = toStr(e).toLowerCase();
+        return recipients.includes(lastEmail.toLowerCase());
+      }) || list.find(e => {
+        const context = `${e.from || ''} ${e.subject || ''}`.toLowerCase();
+        return /qwen|verification|signup|register/.test(context);
+      });
+
+      if (!target) {
+        // Wait before next poll
+        await new Promise(resolve => setTimeout(resolve, 3000));
+      }
     }
-    if (!target) return flash('No email yet — press again in a few seconds');
 
-    const text = `${target.subject || ''}\n${target.text || String(target.html || '').replace(/<[^>]+>/g, ' ')}`;
-    const m = text.match(/(?:code|otp|verif\w*|验证码)\D{0,80}(\d{4,8})/i)
-           || text.match(/(?:^|\D)(\d{6})(?:\D|$)/)
-           || text.match(/\b(\d{4,8})\b/);
-    if (!m) return flash('Email found, but no code detected');
+    if (!target) {
+      return flash('No verification email received yet. Try again in ~10 seconds.');
+    }
 
-    const code = m[1];
-    try { await sendToTab({ type: 'FILL_CODE', code, autosubmit: cfg.autosubmit }); } catch {}
-    try { await navigator.clipboard.writeText(code); } catch {}
+    // Extract verification code from email content
+    const emailBody = `${target.subject || ''}\n${target.text || ''}`;
+    const htmlText = target.html ? String(target.html).replace(/<[^>]+>/g, ' ') : '';
+    const fullText = `${emailBody}\n${htmlText}`;
+
+    // Multiple regex patterns to catch various code formats
+    const codeMatch = 
+      fullText.match(/(?:verification\s*code|otp|your\s*code|验证码)[:\s]*(\d{4,8})/i) ||
+      fullText.match(/(?:code|otp|verif\w*)[:\s]*(\d{4,8})/i) ||
+      fullText.match(/(?:^|\s|\D)(\d{6})(?:\s|$|\D)/) ||  // exactly 6 digits
+      fullText.match(/\b(\d{4,8})\b/);  // fallback: any 4-8 digit number
+
+    if (!codeMatch) {
+      return flash('Email found but no code detected. Check manually in TestMail dashboard.');
+    }
+
+    const code = codeMatch[1];
+    
+    // Fill the code into the page and copy to clipboard
+    try { await sendToTab({ type: 'FILL_CODE', code, autosubmit: cfg.autosubmit }); } catch (fillErr) {
+      console.log('Auto-fill failed:', fillErr);
+    }
+    try { await navigator.clipboard.writeText(code); } catch (clipErr) {
+      console.log('Clipboard copy failed:', clipErr);
+    }
+    
     $('manualcode').value = code;
-    flash(`Code ${code} — filled & copied ✔`);
-  } catch (e) { flash('Error: ' + e.message); }
+    flash(`✓ Code ${code} extracted! Filled & copied.`);
+  } catch (e) {
+    flash(`Error: ${e.message}`);
+    console.error('getCode error:', e);
+  }
 }
 
 const flash = msg => $('status').textContent = msg;

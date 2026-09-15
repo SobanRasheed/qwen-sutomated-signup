@@ -1,11 +1,10 @@
 {
-  "manifest_version": 3,
-  "name": "Qwen Cloud AutoSignup",
+  "manifest_version": 2,
+  "name": "Qwen Cloud AutoSignup (Tor Browser)",
   "version": "1.0.0",
-  "description": "Auto-fills Qwen Cloud signup with randomized TestMail emails (namespace gti43) and your saved password.",
-  "permissions": ["storage", "activeTab", "scripting", "clipboardWrite"],
-  "host_permissions": ["https://*.qwen.ai/*", "https://api.testmail.app/*"],
-  "action": { "default_popup": "popup.html", "default_title": "Qwen AutoSignup" },
+  "description": "Auto-fills Qwen Cloud signup form in Tor Browser with randomized email addresses.",
+  "permissions": ["activeTab", "storage"],
+  "browser_action": { "default_popup": "popup.html", "default_title": "Qwen AutoSignup" },
   "content_scripts": [
     { "matches": ["https://*.qwen.ai/*"], "js": ["content.js"], "run_at": "document_idle" }
   ]
