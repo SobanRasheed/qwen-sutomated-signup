@@ -1,0 +1,62 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<style>
+  body { font: 13px/1.4 system-ui, sans-serif; width: 320px; margin: 0; padding: 12px;
+         background: #111318; color: #e6e6e6; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label { display: block; margin: 8px 0 3px; color: #9aa0aa; font-size: 11px;
+          text-transform: uppercase; letter-spacing: .04em; }
+  input[type=text], input[type=password] { width: 100%; box-sizing: border-box; padding: 6px 8px;
+          border-radius: 6px; border: 1px solid #333a44; background: #1b1f27; color: #e6e6e6; }
+  .row { display: flex; align-items: center; gap: 8px; margin: 8px 0; font-size: 12px; }
+  button { padding: 7px 10px; border-radius: 6px; border: 0; cursor: pointer; font-weight: 600; }
+  .primary   { background: #4f7cff; color: #fff; width: 100%; margin-top: 10px; }
+  .secondary { background: #2a2f39; color: #dfe3ea; width: 100%; }
+  #lastemail { font-family: ui-monospace, monospace; font-size: 12px; color: #7fd18c;
+               word-break: break-all; flex: 1; }
+  #status { margin-top: 10px; min-height: 16px; font-size: 12px; color: #f0c674; }
+  .inline { display: flex; align-items: center; gap: 4px; font-size: 12px; color: #c7ccd4; }
+</style>
+</head>
+<body>
+  <h1>Qwen Cloud ⚡ AutoSignup</h1>
+
+  <div class="row" style="justify-content:space-between">
+    <span id="lastemail">—</span>
+    <button id="copy" class="secondary" style="width:auto">Copy</button>
+  </div>
+
+  <label>TestMail namespace</label>
+  <input type="text" id="namespace">
+
+  <label>Tag prefix (random suffix auto-added)</label>
+  <input type="text" id="tag">
+
+  <label>Password (reused every fill)</label>
+  <div class="row">
+    <input type="password" id="password" style="flex:1">
+    <span class="inline"><input type="checkbox" id="showpass"> show</span>
+  </div>
+
+  <label>TestMail API key (for code auto-fetch)</label>
+  <input type="password" id="apikey">
+<label>Code (manual fallback)</label>
+<div class="row">
+  <input type="text" id="manualcode" placeholder="e.g. 483920" inputmode="numeric" style="flex:1">
+  <button id="fillcode" class="secondary" style="width:auto">Fill</button>
+</div>
+
+  <div class="row"><input type="checkbox" id="autofill"><span>Auto-fill when signup form appears</span></div>
+  <div class="row"><input type="checkbox" id="autosubmit"><span>Auto-click Continue/Submit after filling</span></div>
+
+  <button id="save" class="secondary">Save settings</button>
+  <button id="fill" class="primary">🎲 Fill form (new random email)</button>
+  <button id="fillsubmit" class="secondary">Fill + auto-submit</button>
+  <button id="getcode" class="secondary">📩 Fetch verification code</button>
+
+  <div id="status"></div>
+</body>
+<script src="popup.js"></script>
+</html>
